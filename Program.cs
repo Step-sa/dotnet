@@ -1,5 +1,8 @@
 ﻿using System;
 
+// № 4
+using System.IO; // Формирование пути к журналу.
+
 namespace ArtGalleryApp
 {
     public interface IValuable
@@ -102,45 +105,40 @@ namespace ArtGalleryApp
             Description = description;
         }
     }
-
+    // № 2
     public class Hall
     {
         public string Name;
         public int Floor;
-        public ArtPiece[] Pieces;
-        public int Count;
+        public readonly GalleryCollection<ArtPiece> Pieces;
+        public int Count => Pieces.Count;
 
         public Hall(string name, int floor, int capacity)
         {
             Name = name;
             Floor = floor;
-            Pieces = new ArtPiece[capacity];
-            Count = 0;
+
+            Pieces = new GalleryCollection<ArtPiece>(capacity);
         }
 
         public bool AddPiece(ArtPiece piece)
         {
-            if (Count < Pieces.Length)
-            {
-                Pieces[Count] = piece;
-                Count++;
-                return true;
-            }
-            return false;
+            return Pieces.TryAdd(piece);
         }
 
         public void ShowAllPieces()
         {
-            Console.WriteLine("--- " + Name + " (Этаж " + Floor + ", Мест: " + Count + "/" + Pieces.Length + ") ---");
+
+            Console.WriteLine("--- " + Name + " (Этаж " + Floor + ", Мест: " + Count + "/" + Pieces.Capacity + ") ---");
             if (Count == 0)
             {
                 Console.WriteLine("  В зале нет экспонатов.");
                 return;
             }
 
-            for (int i = 0; i < Count; i++)
+            foreach (ArtPiece piece in Pieces)
             {
-                Pieces[i].ShowInfo();
+                piece.ShowInfo();
                 Console.WriteLine();
             }
         }
@@ -235,6 +233,21 @@ namespace ArtGalleryApp
         }
     }
 
+    // № 2
+    internal interface IArtPieceViewer<in T> where T : ArtPiece
+    {
+        void Show(T piece);
+    }
+
+    // № 2
+    internal class ArtPieceTitleViewer : IArtPieceViewer<ArtPiece>
+    {
+        public void Show(ArtPiece piece)
+        {
+            Console.WriteLine("  " + piece.Title);
+        }
+    }
+
     public class Program
     {
         static Artist SelectOrCreateArtist(Artist[] artists, ref int artistCount)
@@ -293,9 +306,80 @@ namespace ArtGalleryApp
             return newGenre;
         }
 
+        // № 2
+        static void ShowGenericCollectionDemo(Painting painting)
+        {
+            var paintings = new GalleryCollection<Painting>(1);
+            paintings.TryAdd(painting);
+
+            IEnumerable<Painting> paintingSequence = paintings;
+            IEnumerable<ArtPiece> artPieces = paintingSequence;
+            Console.WriteLine("Ковариантность: перебираем картины как экспонаты.");
+            foreach (ArtPiece piece in artPieces)
+                Console.WriteLine("  " + piece.Title);
+            
+            IArtPieceViewer<ArtPiece> artPieceViewer = new ArtPieceTitleViewer();
+            IArtPieceViewer<Painting> paintingViewer = artPieceViewer;
+            Console.WriteLine("Контравариантность: обработчик экспонатов выводит картину.");
+            paintingViewer.Show(painting);
+        }
+
+        // № 3
+        // Критерии заданы в Program, поэтому коллекция ничего не знает о цене и годе.
+        static void ShowSortingDemo(Hall hall, GalleryLogger logger)
+        {
+            GalleryCollection<ArtPiece> pieces = hall.Pieces;
+            // № 3
+            // Func принимает экспонат и возвращает его цену как ключ сравнения.
+            Func<ArtPiece, decimal> selectPrice = piece => piece.Price;
+            Comparison<ArtPiece> compareByPrice = (first, second) =>
+                selectPrice(first).CompareTo(selectPrice(second));
+            Comparison<ArtPiece> compareByNewestFirst = (first, second) =>
+                second.Year.CompareTo(first.Year);
+            // № 3
+            // Коллекция вызывает это действие для каждого экспоната при выводе.
+            Action<ArtPiece> showPiece = piece =>
+                Console.WriteLine("  " + piece.Title + " (" + piece.Year + " г., " + piece.Price + " руб.)");
+
+            Console.WriteLine("Зал: " + hall.Name);
+            Console.WriteLine("До сортировки:");
+            pieces.ForEach(showPiece);
+
+            // № 3
+            // Сравниваем первые два экспоната тем же правилом, что и при сортировке по цене.
+            if (pieces.Count >= 2)
+            {
+                int result = pieces.CompareAt(0, 1, compareByPrice);
+                string relation = result < 0 ? "дешевле второго"
+                    : result > 0 ? "дороже второго" : "стоит столько же, сколько второй";
+                Console.WriteLine("Первый экспонат " + relation + ".");
+            }
+
+            pieces.Sort(compareByPrice);
+            Console.WriteLine("По цене, от меньшей к большей:");
+            pieces.ForEach(showPiece);
+
+            pieces.Sort(compareByNewestFirst);
+            Console.WriteLine("По году, от новых к старым:");
+            pieces.ForEach(showPiece);
+
+            // № 4
+            // После обеих сортировок передаём в журнал число обработанных экспонатов.
+            logger.Log("Сортировка завершена. Экспонатов обработано", pieces.Count);
+        }
+
         static void Main(string[] args)
         {
             Console.OutputEncoding = System.Text.Encoding.UTF8;
+
+            // № 4
+            // Оба подписчика получают каждую запись, а меню вызывает только Log<T>.
+            var logger = new GalleryLogger();
+            var consoleLog = new ConsoleLogWriter();
+            var fileLog = new FileLogWriter(Path.Combine(Environment.CurrentDirectory, "gallery.log"));
+            logger.EntryCreated += consoleLog.Write;
+            logger.EntryCreated += fileLog.Write;
+            logger.Log("Запуск приложения", "Художественная галерея");
 
             Artist[] artists = new Artist[20];
             int artistCount = 0;
@@ -308,7 +392,10 @@ namespace ArtGalleryApp
             genres[genreCount++] = new Genre("Пейзаж", "Изображение природы и ландшафтов");
 
             Hall hall1 = new Hall("Зал живописи", 1, 2);
-            hall1.AddPiece(new Painting("Утро в сосновом лесу", 1889, artists[0], genres[1], "Холст, масло", 150000000m));
+            // № 2
+            // Сохраняем ссылку на первую картину для пункта демонстрации.
+            Painting firstPainting = new Painting("Утро в сосновом лесу", 1889, artists[0], genres[1], "Холст, масло", 150000000m);
+            hall1.AddPiece(firstPainting);
             hall1.AddPiece(new Painting("Рожь", 1878, artists[0], genres[1], "Холст, масло", 100000000m));
 
             Hall hall2 = new Hall("Зал скульптуры", 2, 2);
@@ -317,6 +404,9 @@ namespace ArtGalleryApp
             Exhibition exhibition = new Exhibition("Шедевры галереи", 5);
             exhibition.AddHall(hall1);
             exhibition.AddHall(hall2);
+            // № 4
+            // Записываем название выставки после заполнения её залов.
+            logger.Log("Выставка подготовлена", exhibition.Title);
 
             Guide guide = new Guide("Алексей Смирнов", 7);
             Tour tour = new Tour("Главные шедевры коллекции", guide, 60, 15);
@@ -330,11 +420,20 @@ namespace ArtGalleryApp
                 Console.WriteLine("4. Расчет и покупка экскурсионных билетов");
                 Console.WriteLine("5. Финансовый отчет (общая стоимость экспонатов)");
                 Console.WriteLine("6. Выход");
+                // № 2
+                // Отдельный пункт для задания №2 с сохранением номеров остальных пунктов.
+                Console.WriteLine("7. Показать работу обобщённой коллекции");
+                // № 3
+                // Отдельный пункт запускает демонстрацию делегатов на экспонатах зала.
+                Console.WriteLine("8. Сравнить и отсортировать экспонаты зала живописи");
                 Console.Write("Выберите пункт: ");
 
                 string choice = Console.ReadLine();
                 Console.WriteLine();
 
+                // № 4
+                // Фиксируем выбранный этап до выполнения команды меню.
+                logger.Log("Выбран пункт меню", choice);
                 switch (choice)
                 {
                     case "1":
@@ -345,7 +444,9 @@ namespace ArtGalleryApp
                         Console.WriteLine("Выберите зал для добавления:");
                         for (int i = 0; i < exhibition.HallCount; i++)
                         {
-                            Console.WriteLine((i + 1) + ". " + exhibition.Halls[i].Name + " (Занято " + exhibition.Halls[i].Count + "/" + exhibition.Halls[i].Pieces.Length + ")");
+                            // № 2
+                            // Вместимость теперь читается из обобщённой коллекции.
+                            Console.WriteLine((i + 1) + ". " + exhibition.Halls[i].Name + " (Занято " + exhibition.Halls[i].Count + "/" + exhibition.Halls[i].Pieces.Capacity + ")");
                         }
                         Console.Write("Номер зала: ");
                         int hallIndex = Convert.ToInt32(Console.ReadLine()) - 1;
@@ -392,10 +493,16 @@ namespace ArtGalleryApp
                                 if (selectedHall.AddPiece(newPiece))
                                 {
                                     Console.WriteLine("\nЭкспонат успешно добавлен в зал!");
+                                    // № 4
+                                    // Запись связывает добавленный экспонат с его залом.
+                                    logger.Log("Экспонат добавлен в зал «" + selectedHall.Name + "»", newPiece.Title);
                                 }
                                 else
                                 {
                                     Console.WriteLine("\nОтказ: Зал переполнен, лимит мест исчерпан.");
+                                    // № 4
+                                    // Записываем отказ, чтобы отличить попытку от успешного добавления.
+                                    logger.Log("Добавление отклонено. Зал заполнен", selectedHall.Name);
                                 }
                             }
                         }
@@ -413,12 +520,12 @@ namespace ArtGalleryApp
                         for (int i = 0; i < exhibition.HallCount; i++)
                         {
                             Hall h = exhibition.Halls[i];
-                            for (int j = 0; j < h.Count; j++)
+                            foreach (ArtPiece piece in h.Pieces)
                             {
-                                if (h.Pieces[j].Author.Name.ToLower().Contains(query))
+                                if (piece.Author.Name.ToLower().Contains(query))
                                 {
                                     Console.WriteLine("\nНайдено в «" + h.Name + "»:");
-                                    h.Pieces[j].ShowInfo();
+                                    piece.ShowInfo();
                                     found = true;
                                 }
                             }
@@ -428,6 +535,9 @@ namespace ArtGalleryApp
                         {
                             Console.WriteLine("Экспонатов указанного автора не найдено.");
                         }
+                        // № 4
+                        // В журнале сохраняем результат завершённого поиска.
+                        logger.Log("Поиск по автору завершён", found ? "есть совпадения" : "совпадений нет");
                         break;
 
                     case "4":
@@ -462,7 +572,11 @@ namespace ArtGalleryApp
                         Console.WriteLine("\n--- Расчет билетов ---");
                         Console.WriteLine("Обычные билеты: " + regularCount + " шт. x " + ticket.StandardPrice + " руб. = " + (regularCount * ticket.StandardPrice) + " руб.");
                         Console.WriteLine("Льготные билеты: " + discountCount + " шт. x " + ticket.DiscountPrice + " руб. = " + (discountCount * ticket.DiscountPrice) + " руб.");
-                        Console.WriteLine("Итого к олате: " + ticket.CalculateCost() + " руб.");
+                        // № 4
+                        // Рассчитываем сумму один раз для вывода и записи в журнал.
+                        decimal ticketCost = ticket.CalculateCost();
+                        Console.WriteLine("Итого к олате: " + ticketCost + " руб.");
+                        logger.Log("Стоимость рассчитанных билетов, руб.", ticketCost);
                         break;
 
                     case "5":
@@ -472,9 +586,9 @@ namespace ArtGalleryApp
                         for (int i = 0; i < exhibition.HallCount; i++)
                         {
                             Hall h = exhibition.Halls[i];
-                            for (int j = 0; j < h.Count; j++)
+                            foreach (ArtPiece piece in h.Pieces)
                             {
-                                totalSum += h.Pieces[j].Price;
+                                totalSum += piece.Price;
                                 totalPiecesCount++;
                             }
                         }
@@ -482,11 +596,29 @@ namespace ArtGalleryApp
                         Console.WriteLine("--- Финансовый отчет галереи ---");
                         Console.WriteLine("Всего экспонатов на выставке: " + totalPiecesCount + " шт.");
                         Console.WriteLine("Общая оценочная стоимость фондов: " + totalSum + " руб.");
+                        // № 4
+                        // Сохраняем итоговую сумму после формирования отчёта.
+                        logger.Log("Финансовый отчёт сформирован. Стоимость фондов, руб.", totalSum);
                         break;
 
                     case "6":
                         running = false;
                         Console.WriteLine("Программа завершена.");
+                        // № 4
+                        // Последняя запись отмечает штатный выход через меню.
+                        logger.Log("Завершение приложения", "Выход из меню");
+                        break;
+                    
+                    case "7":
+                        ShowGenericCollectionDemo(firstPainting);
+                        break;
+
+                    // № 3
+                    // Правила сравнения задаёт демонстрация, коллекция применяет их к экспонатам.
+                    case "8":
+                        // № 4
+                        // Передаём тот же логгер для записи результата сортировки.
+                        ShowSortingDemo(hall1, logger);
                         break;
 
                     default:
