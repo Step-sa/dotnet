@@ -239,7 +239,6 @@ namespace ArtGalleryApp
         void Show(T piece);
     }
 
-    // № 2
     internal class ArtPieceTitleViewer : IArtPieceViewer<ArtPiece>
     {
         public void Show(ArtPiece piece)
@@ -325,19 +324,16 @@ namespace ArtGalleryApp
         }
 
         // № 3
-        // Критерии заданы в Program, поэтому коллекция ничего не знает о цене и годе.
         static void ShowSortingDemo(Hall hall, GalleryLogger logger)
         {
             GalleryCollection<ArtPiece> pieces = hall.Pieces;
-            // № 3
-            // Func принимает экспонат и возвращает его цену как ключ сравнения.
             Func<ArtPiece, decimal> selectPrice = piece => piece.Price;
             Comparison<ArtPiece> compareByPrice = (first, second) =>
                 selectPrice(first).CompareTo(selectPrice(second));
             Comparison<ArtPiece> compareByNewestFirst = (first, second) =>
                 second.Year.CompareTo(first.Year);
-            // № 3
-            // Коллекция вызывает это действие для каждого экспоната при выводе.
+ 
+
             Action<ArtPiece> showPiece = piece =>
                 Console.WriteLine("  " + piece.Title + " (" + piece.Year + " г., " + piece.Price + " руб.)");
 
@@ -345,8 +341,6 @@ namespace ArtGalleryApp
             Console.WriteLine("До сортировки:");
             pieces.ForEach(showPiece);
 
-            // № 3
-            // Сравниваем первые два экспоната тем же правилом, что и при сортировке по цене.
             if (pieces.Count >= 2)
             {
                 int result = pieces.CompareAt(0, 1, compareByPrice);
@@ -364,7 +358,6 @@ namespace ArtGalleryApp
             pieces.ForEach(showPiece);
 
             // № 4
-            // После обеих сортировок передаём в журнал число обработанных экспонатов.
             logger.Log("Сортировка завершена. Экспонатов обработано", pieces.Count);
         }
 
@@ -392,8 +385,6 @@ namespace ArtGalleryApp
             genres[genreCount++] = new Genre("Пейзаж", "Изображение природы и ландшафтов");
 
             Hall hall1 = new Hall("Зал живописи", 1, 2);
-            // № 2
-            // Сохраняем ссылку на первую картину для пункта демонстрации.
             Painting firstPainting = new Painting("Утро в сосновом лесу", 1889, artists[0], genres[1], "Холст, масло", 150000000m);
             hall1.AddPiece(firstPainting);
             hall1.AddPiece(new Painting("Рожь", 1878, artists[0], genres[1], "Холст, масло", 100000000m));
@@ -420,11 +411,7 @@ namespace ArtGalleryApp
                 Console.WriteLine("4. Расчет и покупка экскурсионных билетов");
                 Console.WriteLine("5. Финансовый отчет (общая стоимость экспонатов)");
                 Console.WriteLine("6. Выход");
-                // № 2
-                // Отдельный пункт для задания №2 с сохранением номеров остальных пунктов.
                 Console.WriteLine("7. Показать работу обобщённой коллекции");
-                // № 3
-                // Отдельный пункт запускает демонстрацию делегатов на экспонатах зала.
                 Console.WriteLine("8. Сравнить и отсортировать экспонаты зала живописи");
                 Console.Write("Выберите пункт: ");
 
@@ -444,8 +431,6 @@ namespace ArtGalleryApp
                         Console.WriteLine("Выберите зал для добавления:");
                         for (int i = 0; i < exhibition.HallCount; i++)
                         {
-                            // № 2
-                            // Вместимость теперь читается из обобщённой коллекции.
                             Console.WriteLine((i + 1) + ". " + exhibition.Halls[i].Name + " (Занято " + exhibition.Halls[i].Count + "/" + exhibition.Halls[i].Pieces.Capacity + ")");
                         }
                         Console.Write("Номер зала: ");
@@ -613,8 +598,7 @@ namespace ArtGalleryApp
                         ShowGenericCollectionDemo(firstPainting);
                         break;
 
-                    // № 3
-                    // Правила сравнения задаёт демонстрация, коллекция применяет их к экспонатам.
+
                     case "8":
                         // № 4
                         // Передаём тот же логгер для записи результата сортировки.
