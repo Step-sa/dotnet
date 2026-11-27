@@ -1,7 +1,8 @@
 ﻿using System;
-
-// № 4
-using System.IO; // Формирование пути к журналу.
+using System.IO;
+using System.Collections.Concurrent;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace ArtGalleryApp
 {
@@ -239,6 +240,7 @@ namespace ArtGalleryApp
         void Show(T piece);
     }
 
+    // № 2
     internal class ArtPieceTitleViewer : IArtPieceViewer<ArtPiece>
     {
         public void Show(ArtPiece piece)
@@ -324,16 +326,17 @@ namespace ArtGalleryApp
         }
 
         // № 3
-        static void ShowSortingDemo(Hall hall, GalleryLogger logger)
+        // № 6
+        static async Task ShowSortingDemo(Hall hall, GalleryLogger logger)
         {
             GalleryCollection<ArtPiece> pieces = hall.Pieces;
+            // № 3
             Func<ArtPiece, decimal> selectPrice = piece => piece.Price;
             Comparison<ArtPiece> compareByPrice = (first, second) =>
                 selectPrice(first).CompareTo(selectPrice(second));
             Comparison<ArtPiece> compareByNewestFirst = (first, second) =>
                 second.Year.CompareTo(first.Year);
- 
-
+            // № 3
             Action<ArtPiece> showPiece = piece =>
                 Console.WriteLine("  " + piece.Title + " (" + piece.Year + " г., " + piece.Price + " руб.)");
 
@@ -341,6 +344,7 @@ namespace ArtGalleryApp
             Console.WriteLine("До сортировки:");
             pieces.ForEach(showPiece);
 
+            // № 3
             if (pieces.Count >= 2)
             {
                 int result = pieces.CompareAt(0, 1, compareByPrice);
@@ -349,31 +353,102 @@ namespace ArtGalleryApp
                 Console.WriteLine("Первый экспонат " + relation + ".");
             }
 
-            pieces.Sort(compareByPrice);
+            // № 6
+            await SortAndLogAsync(pieces, compareByPrice, logger);
             Console.WriteLine("По цене, от меньшей к большей:");
             pieces.ForEach(showPiece);
 
-            pieces.Sort(compareByNewestFirst);
+            // № 6
+            await SortAndLogAsync(pieces, compareByNewestFirst, logger);
             Console.WriteLine("По году, от новых к старым:");
             pieces.ForEach(showPiece);
 
-            // № 4
-            logger.Log("Сортировка завершена. Экспонатов обработано", pieces.Count);
         }
 
-        static void Main(string[] args)
+        // № 6
+        static async Task SortAndLogAsync(GalleryCollection<ArtPiece> pieces,
+            Comparison<ArtPiece> comparison, GalleryLogger logger)
+        {
+            using var messages = new BlockingCollection<string>();
+            Task loggingTask = Task.Factory.StartNew(() =>
+            {
+                foreach (string message in messages.GetConsumingEnumerable())
+                    logger.Log("Поток логирования " + Thread.CurrentThread.ManagedThreadId, message);
+            }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+
+            try
+            {
+                await pieces.SortAsync(comparison, messages.Add);
+            }
+            finally
+            {
+                messages.CompleteAdding();
+                await loggingTask;
+            }
+        }
+
+        static async Task Main(string[] args)
         {
             Console.OutputEncoding = System.Text.Encoding.UTF8;
 
             // № 4
-            // Оба подписчика получают каждую запись, а меню вызывает только Log<T>.
             var logger = new GalleryLogger();
             var consoleLog = new ConsoleLogWriter();
             var fileLog = new FileLogWriter(Path.Combine(Environment.CurrentDirectory, "gallery.log"));
             logger.EntryCreated += consoleLog.Write;
             logger.EntryCreated += fileLog.Write;
-            logger.Log("Запуск приложения", "Художественная галерея");
+            // № 5
+            try
+            {
+                logger.Log("Запуск приложения", "Художественная галерея");
+                GalleryConfiguration settings = GalleryConfiguration.Load(
+                    Path.Combine(AppContext.BaseDirectory, "gallery-settings.json"));
+                logger.Log("Конфигурация загружена. Размер группы", settings.MaxGroupSize);
+                // № 6
+                await RunGallery(logger, settings);
+            }
+            catch (GalleryException error)
+            {
+                ReportError(logger, "Ошибка правил галереи", error);
+            }
+            catch (System.Text.Json.JsonException error)
+            {
+                ReportError(logger, "Некорректный JSON конфигурации", error);
+            }
+            catch (FileNotFoundException error)
+            {
+                ReportError(logger, "Файл конфигурации не найден", error);
+            }
+            catch (UnauthorizedAccessException error)
+            {
+                ReportError(logger, "Нет доступа к файлу", error);
+            }
+            catch (IOException error)
+            {
+                ReportError(logger, "Ошибка чтения или записи файла", error);
+            }
+        }
 
+        // № 5
+        static void ReportError(GalleryLogger logger, string message, Exception error)
+        {
+            try
+            {
+                logger.Log(message, error.Message);
+            }
+            catch (IOException logError)
+            {
+                Console.Error.WriteLine("Не удалось записать ошибку в файл журнала: " + logError.Message);
+            }
+            catch (UnauthorizedAccessException logError)
+            {
+                Console.Error.WriteLine("Нет доступа к файлу журнала: " + logError.Message);
+            }
+        }
+
+        // № 6
+        static async Task RunGallery(GalleryLogger logger, GalleryConfiguration settings)
+        {
             Artist[] artists = new Artist[20];
             int artistCount = 0;
             artists[artistCount++] = new Artist("Иван Шишкин", "Россия", 1832);
@@ -385,6 +460,7 @@ namespace ArtGalleryApp
             genres[genreCount++] = new Genre("Пейзаж", "Изображение природы и ландшафтов");
 
             Hall hall1 = new Hall("Зал живописи", 1, 2);
+            // № 2
             Painting firstPainting = new Painting("Утро в сосновом лесу", 1889, artists[0], genres[1], "Холст, масло", 150000000m);
             hall1.AddPiece(firstPainting);
             hall1.AddPiece(new Painting("Рожь", 1878, artists[0], genres[1], "Холст, масло", 100000000m));
@@ -396,11 +472,11 @@ namespace ArtGalleryApp
             exhibition.AddHall(hall1);
             exhibition.AddHall(hall2);
             // № 4
-            // Записываем название выставки после заполнения её залов.
             logger.Log("Выставка подготовлена", exhibition.Title);
 
             Guide guide = new Guide("Алексей Смирнов", 7);
-            Tour tour = new Tour("Главные шедевры коллекции", guide, 60, 15);
+            // № 5
+            Tour tour = new Tour("Главные шедевры коллекции", guide, 60, settings.MaxGroupSize!.Value);
 
             bool running = true;
             while (running)
@@ -415,199 +491,215 @@ namespace ArtGalleryApp
                 Console.WriteLine("8. Сравнить и отсортировать экспонаты зала живописи");
                 Console.Write("Выберите пункт: ");
 
-                string choice = Console.ReadLine();
+                string? choice = Console.ReadLine();
+                if (choice == null)
+                {
+                    logger.Log("Завершение приложения", "Ввод завершён");
+                    return;
+                }
                 Console.WriteLine();
 
                 // № 4
-                // Фиксируем выбранный этап до выполнения команды меню.
                 logger.Log("Выбран пункт меню", choice);
-                switch (choice)
+                // № 5
+                try
                 {
-                    case "1":
-                        exhibition.ShowExhibition();
-                        break;
+                    switch (choice)
+                    {
+                        case "1":
+                            exhibition.ShowExhibition();
+                            break;
 
-                    case "2":
-                        Console.WriteLine("Выберите зал для добавления:");
-                        for (int i = 0; i < exhibition.HallCount; i++)
-                        {
-                            Console.WriteLine((i + 1) + ". " + exhibition.Halls[i].Name + " (Занято " + exhibition.Halls[i].Count + "/" + exhibition.Halls[i].Pieces.Capacity + ")");
-                        }
-                        Console.Write("Номер зала: ");
-                        int hallIndex = Convert.ToInt32(Console.ReadLine()) - 1;
-
-                        if (hallIndex >= 0 && hallIndex < exhibition.HallCount)
-                        {
-                            Hall selectedHall = exhibition.Halls[hallIndex];
-
-                            Console.WriteLine("\nКакой тип экспоната добавить?");
-                            Console.WriteLine("1. Картина");
-                            Console.WriteLine("2. Скульптура");
-                            Console.Write("Выбор: ");
-                            string typeChoice = Console.ReadLine();
-
-                            Console.Write("Название произведения: ");
-                            string title = Console.ReadLine();
-
-                            Artist selectedAuthor = SelectOrCreateArtist(artists, ref artistCount);
-                            Genre selectedGenre = SelectOrCreateGenre(genres, ref genreCount);
-
-                            Console.Write("Год создания: ");
-                            int year = Convert.ToInt32(Console.ReadLine());
-
-                            Console.Write("Оценочная стоимость (руб): ");
-                            decimal price = Convert.ToDecimal(Console.ReadLine());
-
-                            ArtPiece newPiece = null;
-
-                            if (typeChoice == "1")
+                        case "2":
+                            Console.WriteLine("Выберите зал для добавления:");
+                            for (int i = 0; i < exhibition.HallCount; i++)
                             {
-                                Console.Write("Техника (например: Холст, масло): ");
-                                string tech = Console.ReadLine();
-                                newPiece = new Painting(title, year, selectedAuthor, selectedGenre, tech, price);
+                                Console.WriteLine((i + 1) + ". " + exhibition.Halls[i].Name + " (Занято " + exhibition.Halls[i].Count + "/" + exhibition.Halls[i].Pieces.Capacity + ")");
                             }
-                            else if (typeChoice == "2")
-                            {
-                                Console.Write("Материал (например: Мрамор, Бронза): ");
-                                string mat = Console.ReadLine();
-                                newPiece = new Sculpture(title, year, selectedAuthor, selectedGenre, mat, price);
-                            }
+                            Console.Write("Номер зала: ");
+                            int hallIndex = Convert.ToInt32(Console.ReadLine()) - 1;
 
-                            if (newPiece != null)
+                            if (hallIndex >= 0 && hallIndex < exhibition.HallCount)
                             {
-                                if (selectedHall.AddPiece(newPiece))
+                                Hall selectedHall = exhibition.Halls[hallIndex];
+
+                                Console.WriteLine("\nКакой тип экспоната добавить?");
+                                Console.WriteLine("1. Картина");
+                                Console.WriteLine("2. Скульптура");
+                                Console.Write("Выбор: ");
+                                string typeChoice = Console.ReadLine();
+
+                                Console.Write("Название произведения: ");
+                                string title = Console.ReadLine();
+
+                                Artist selectedAuthor = SelectOrCreateArtist(artists, ref artistCount);
+                                Genre selectedGenre = SelectOrCreateGenre(genres, ref genreCount);
+
+                                Console.Write("Год создания: ");
+                                int year = Convert.ToInt32(Console.ReadLine());
+
+                                Console.Write("Оценочная стоимость (руб): ");
+                                decimal price = Convert.ToDecimal(Console.ReadLine());
+
+                                ArtPiece newPiece = null;
+
+                                if (typeChoice == "1")
                                 {
-                                    Console.WriteLine("\nЭкспонат успешно добавлен в зал!");
-                                    // № 4
-                                    // Запись связывает добавленный экспонат с его залом.
-                                    logger.Log("Экспонат добавлен в зал «" + selectedHall.Name + "»", newPiece.Title);
+                                    Console.Write("Техника (например: Холст, масло): ");
+                                    string tech = Console.ReadLine();
+                                    newPiece = new Painting(title, year, selectedAuthor, selectedGenre, tech, price);
                                 }
-                                else
+                                else if (typeChoice == "2")
                                 {
-                                    Console.WriteLine("\nОтказ: Зал переполнен, лимит мест исчерпан.");
-                                    // № 4
-                                    // Записываем отказ, чтобы отличить попытку от успешного добавления.
-                                    logger.Log("Добавление отклонено. Зал заполнен", selectedHall.Name);
+                                    Console.Write("Материал (например: Мрамор, Бронза): ");
+                                    string mat = Console.ReadLine();
+                                    newPiece = new Sculpture(title, year, selectedAuthor, selectedGenre, mat, price);
                                 }
-                            }
-                        }
-                        else
-                        {
-                            Console.WriteLine("Неверный номер зала.");
-                        }
-                        break;
 
-                    case "3":
-                        Console.Write("Введите имя или фамилию автора: ");
-                        string query = Console.ReadLine().ToLower();
-                        bool found = false;
-
-                        for (int i = 0; i < exhibition.HallCount; i++)
-                        {
-                            Hall h = exhibition.Halls[i];
-                            foreach (ArtPiece piece in h.Pieces)
-                            {
-                                if (piece.Author.Name.ToLower().Contains(query))
+                                if (newPiece != null)
                                 {
-                                    Console.WriteLine("\nНайдено в «" + h.Name + "»:");
-                                    piece.ShowInfo();
-                                    found = true;
+                                    if (selectedHall.AddPiece(newPiece))
+                                    {
+                                        Console.WriteLine("\nЭкспонат успешно добавлен в зал!");
+                                        // № 4
+                                        logger.Log("Экспонат добавлен в зал «" + selectedHall.Name + "»", newPiece.Title);
+                                    }
+                                    else
+                                    {
+                                        Console.WriteLine("\nОтказ: Зал переполнен, лимит мест исчерпан.");
+                                        // № 4
+                                        logger.Log("Добавление отклонено. Зал заполнен", selectedHall.Name);
+                                    }
                                 }
                             }
-                        }
-
-                        if (!found)
-                        {
-                            Console.WriteLine("Экспонатов указанного автора не найдено.");
-                        }
-                        // № 4
-                        // В журнале сохраняем результат завершённого поиска.
-                        logger.Log("Поиск по автору завершён", found ? "есть совпадения" : "совпадений нет");
-                        break;
-
-                    case "4":
-                        tour.ShowTourInfo();
-                        Console.Write("\nВведите общее количество посетителей в группе: ");
-                        int totalCount = Convert.ToInt32(Console.ReadLine());
-
-                        if (totalCount <= 0)
-                        {
-                            Console.WriteLine("Ошибка: количество посетителей должно быть больше 0.");
-                            break;
-                        }
-
-                        if (totalCount > tour.MaxGroupSize)
-                        {
-                            Console.WriteLine("Ошибка: группа не может превышать " + tour.MaxGroupSize + " человек.");
-                            break;
-                        }
-
-                        Console.Write("Сколько из них имеют льготы (студенты/пенсионеры)?: ");
-                        int discountCount = Convert.ToInt32(Console.ReadLine());
-
-                        if (discountCount < 0 || discountCount > totalCount)
-                        {
-                            Console.WriteLine("Ошибка: число льготников не может быть отрицательным или больше общего числа группы.");
-                            break;
-                        }
-
-                        int regularCount = totalCount - discountCount;
-                        Ticket ticket = new Ticket(tour, regularCount, discountCount);
-
-                        Console.WriteLine("\n--- Расчет билетов ---");
-                        Console.WriteLine("Обычные билеты: " + regularCount + " шт. x " + ticket.StandardPrice + " руб. = " + (regularCount * ticket.StandardPrice) + " руб.");
-                        Console.WriteLine("Льготные билеты: " + discountCount + " шт. x " + ticket.DiscountPrice + " руб. = " + (discountCount * ticket.DiscountPrice) + " руб.");
-                        // № 4
-                        // Рассчитываем сумму один раз для вывода и записи в журнал.
-                        decimal ticketCost = ticket.CalculateCost();
-                        Console.WriteLine("Итого к олате: " + ticketCost + " руб.");
-                        logger.Log("Стоимость рассчитанных билетов, руб.", ticketCost);
-                        break;
-
-                    case "5":
-                        decimal totalSum = 0;
-                        int totalPiecesCount = 0;
-
-                        for (int i = 0; i < exhibition.HallCount; i++)
-                        {
-                            Hall h = exhibition.Halls[i];
-                            foreach (ArtPiece piece in h.Pieces)
+                            else
                             {
-                                totalSum += piece.Price;
-                                totalPiecesCount++;
+                                Console.WriteLine("Неверный номер зала.");
                             }
-                        }
+                            break;
 
-                        Console.WriteLine("--- Финансовый отчет галереи ---");
-                        Console.WriteLine("Всего экспонатов на выставке: " + totalPiecesCount + " шт.");
-                        Console.WriteLine("Общая оценочная стоимость фондов: " + totalSum + " руб.");
-                        // № 4
-                        // Сохраняем итоговую сумму после формирования отчёта.
-                        logger.Log("Финансовый отчёт сформирован. Стоимость фондов, руб.", totalSum);
-                        break;
+                        case "3":
+                            Console.Write("Введите имя или фамилию автора: ");
+                            string query = Console.ReadLine().ToLower();
+                            bool found = false;
 
-                    case "6":
-                        running = false;
-                        Console.WriteLine("Программа завершена.");
-                        // № 4
-                        // Последняя запись отмечает штатный выход через меню.
-                        logger.Log("Завершение приложения", "Выход из меню");
-                        break;
+                            for (int i = 0; i < exhibition.HallCount; i++)
+                            {
+                                Hall h = exhibition.Halls[i];
+                                foreach (ArtPiece piece in h.Pieces)
+                                {
+                                    if (piece.Author.Name.ToLower().Contains(query))
+                                    {
+                                        Console.WriteLine("\nНайдено в «" + h.Name + "»:");
+                                        piece.ShowInfo();
+                                        found = true;
+                                    }
+                                }
+                            }
+
+                            if (!found)
+                            {
+                                Console.WriteLine("Экспонатов указанного автора не найдено.");
+                            }
+                            // № 4
+                            logger.Log("Поиск по автору завершён", found ? "есть совпадения" : "совпадений нет");
+                            break;
+
+                        case "4":
+                            tour.ShowTourInfo();
+                            Console.Write("\nВведите общее количество посетителей в группе: ");
+                            int totalCount = Convert.ToInt32(Console.ReadLine());
+
+                            if (totalCount <= 0)
+                            {
+                                // № 5
+                                throw new GalleryException("Количество посетителей должно быть больше 0.");
+                            }
+
+                            if (totalCount > tour.MaxGroupSize)
+                            {
+                                throw new GalleryException("Группа не может превышать " + tour.MaxGroupSize + " человек.");
+                            }
+
+                            Console.Write("Сколько из них имеют льготы (студенты/пенсионеры)?: ");
+                            int discountCount = Convert.ToInt32(Console.ReadLine());
+
+                            if (discountCount < 0 || discountCount > totalCount)
+                            {
+                                throw new GalleryException("Число льготников должно быть от нуля до числа посетителей.");
+                            }
+
+                            int regularCount = totalCount - discountCount;
+                            // № 5
+                            Ticket ticket = new Ticket(tour, regularCount, discountCount)
+                            {
+                                StandardPrice = settings.StandardPrice!.Value,
+                                DiscountPrice = settings.DiscountPrice!.Value
+                            };
+
+                            Console.WriteLine("\n--- Расчет билетов ---");
+                            Console.WriteLine("Обычные билеты: " + regularCount + " шт. x " + ticket.StandardPrice + " руб. = " + (regularCount * ticket.StandardPrice) + " руб.");
+                            Console.WriteLine("Льготные билеты: " + discountCount + " шт. x " + ticket.DiscountPrice + " руб. = " + (discountCount * ticket.DiscountPrice) + " руб.");
+                            // № 4
+                            decimal ticketCost = ticket.CalculateCost();
+                            Console.WriteLine("Итого к олате: " + ticketCost + " руб.");
+                            logger.Log("Стоимость рассчитанных билетов, руб.", ticketCost);
+                            break;
+
+                        case "5":
+                            decimal totalSum = 0;
+                            int totalPiecesCount = 0;
+
+                            for (int i = 0; i < exhibition.HallCount; i++)
+                            {
+                                Hall h = exhibition.Halls[i];
+                                foreach (ArtPiece piece in h.Pieces)
+                                {
+                                    totalSum += piece.Price;
+                                    totalPiecesCount++;
+                                }
+                            }
+
+                            Console.WriteLine("--- Финансовый отчет галереи ---");
+                            Console.WriteLine("Всего экспонатов на выставке: " + totalPiecesCount + " шт.");
+                            Console.WriteLine("Общая оценочная стоимость фондов: " + totalSum + " руб.");
+                            // № 4
+                            logger.Log("Финансовый отчёт сформирован. Стоимость фондов, руб.", totalSum);
+                            break;
+
+                        case "6":
+                            running = false;
+                            Console.WriteLine("Программа завершена.");
+                            // № 4
+                            logger.Log("Завершение приложения", "Выход из меню");
+                            break;
                     
-                    case "7":
-                        ShowGenericCollectionDemo(firstPainting);
-                        break;
+                        case "7":
+                            ShowGenericCollectionDemo(firstPainting);
+                            break;
 
+                        // № 3
+                        case "8":
+                            await ShowSortingDemo(hall1, logger);
+                            break;
 
-                    case "8":
-                        // № 4
-                        // Передаём тот же логгер для записи результата сортировки.
-                        ShowSortingDemo(hall1, logger);
-                        break;
-
-                    default:
-                        Console.WriteLine("Неверный пункт меню.");
-                        break;
+                        default:
+                            Console.WriteLine("Неверный пункт меню.");
+                            break;
+                    }
+                }
+                // № 5
+                catch (FormatException error)
+                {
+                    ReportError(logger, "Введите число в правильном формате", error);
+                }
+                catch (OverflowException error)
+                {
+                    ReportError(logger, "Введённое число слишком велико", error);
+                }
+                catch (GalleryException error)
+                {
+                    ReportError(logger, "Ошибка правил галереи", error);
                 }
             }
         }
